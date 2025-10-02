@@ -88,7 +88,6 @@ def generate_quiz_questions(resource_id: int):
                     "content": resource.transcript
                 }
             ],
-            max_completion_tokens=3000,
         )
         
         # Parse the JSON response

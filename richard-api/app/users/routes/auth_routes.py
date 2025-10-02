@@ -26,6 +26,8 @@ class AuthResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     profile_picture_url: str | None = None
+    root_folder_id: int | None = None
+    resource_count: int | None = None
 
 
 @router.post("/google-signin", response_model=AuthResponse)
@@ -51,7 +53,9 @@ async def google_signin(
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
-        profile_picture_url=user.profile_picture_url
+        profile_picture_url=user.profile_picture_url,
+        root_folder_id=user.root_folder_id,
+        resource_count=user.resource_count
     )
 
 
@@ -80,5 +84,7 @@ async def apple_signin(
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
-        profile_picture_url=user.profile_picture_url
+        profile_picture_url=user.profile_picture_url,
+        root_folder_id=user.root_folder_id,
+        resource_count=user.resource_count
     )

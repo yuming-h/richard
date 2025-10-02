@@ -81,7 +81,6 @@ def generate_flash_cards(resource_id: int):
                     "content": resource.transcript
                 }
             ],
-            max_completion_tokens=2000,
         )
         
         # Parse the JSON response

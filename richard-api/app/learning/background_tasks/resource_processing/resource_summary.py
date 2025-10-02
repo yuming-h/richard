@@ -140,7 +140,6 @@ def summarize_text(resource: LearningResource, db: Session = None):
                     "content": resource.transcript
                 }
             ],
-            max_completion_tokens=1500,
         )
         
         # Extract the generated summary
@@ -187,6 +186,7 @@ def gen_youtube_title(resource: LearningResource, db: Session = None):
         
         # Configure yt-dlp options for quiet operation
         ydl_opts = {
+            'skip_download': True,  # don't download video
             'quiet': True,
             'no_warnings': True,
         }
@@ -220,7 +220,7 @@ def gen_youtube_title(resource: LearningResource, db: Session = None):
 
 # Map resource types to their title generation functions
 RESOURCE_TYPE_TO_GEN_TITLE_FUNCTION = {
-    LearningResourceFileType.YOUTUBE_LINK: gen_youtube_title,
+    LearningResourceFileType.YOUTUBE_LINK: generate_resource_title,
     LearningResourceFileType.PDF: generate_resource_title,
     LearningResourceFileType.AUDIO: generate_resource_title,
     LearningResourceFileType.TEXT: generate_resource_title,

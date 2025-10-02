@@ -1,11 +1,22 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks, Query, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    UploadFile,
+    File,
+    Form,
+    BackgroundTasks,
+    Query,
+    HTTPException,
+)
 from pydantic import BaseModel
 from typing import Optional, List, Literal, Union, Any
 from datetime import datetime
 from app.auth_dependencies import get_current_user
 from app.users.models import User
 from app.learning.models import LearningResourceFileType, ResourceStatus
-from app.learning.background_tasks.resource_processing.resource_ingestion import ingest_resource
+from app.learning.background_tasks.resource_processing.resource_ingestion import (
+    ingest_resource,
+)
 from app.learning.background_tasks.flash_card_generation import generate_flash_cards
 from app.learning.background_tasks.quiz_generation import generate_quiz_questions
 from app.learning.learning_service import LearningService
@@ -115,33 +126,34 @@ class QuizQuestionResponse(BaseModel):
 @router.get("/folder/{folder_id}", response_model=FolderContentsResponse)
 async def get_folder_contents(
     folder_id: int,
-    item_type: Optional[Literal["folder", "resource"]] = Query(None, description="Filter by item type: 'folder' or 'resource'. If empty, returns all items."),
+    item_type: Optional[Literal["folder", "resource"]] = Query(
+        None,
+        description="Filter by item type: 'folder' or 'resource'. If empty, returns all items.",
+    ),
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Get contents of a specific folder by ID.
-    
+
     - **folder_id**: The ID of the folder to retrieve contents from
     - **item_type**: Optional filter - 'folder' for subfolders only, 'resource' for resources only, or omit for both
-    
+
     Returns a list of items (folders and/or resources) in the specified folder.
     """
-    
+
     result = learning_service.get_folder_contents(
-        folder_id=folder_id,
-        user_id=current_user.id,
-        item_type=item_type
+        folder_id=folder_id, user_id=current_user.id, item_type=item_type
     )
-    
+
     # Convert dictionary items to FolderItem models
     items = [FolderItem(**item) for item in result["items"]]
-    
+
     return FolderContentsResponse(
         folder_id=result["folder_id"],
         folder_name=result["folder_name"],
         created_at=result["created_at"],
-        items=items
+        items=items,
     )
 
 
@@ -149,31 +161,28 @@ async def get_folder_contents(
 async def create_folder(
     request: CreateFolderRequest,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Create a new folder.
-    
+
     - **name**: Name of the folder
     - **parent_folder_id**: ID of the parent folder (optional, None for root level)
-    
+
     Returns the created folder information.
     """
-
-    print("AAAAAA", request)
-    
     folder = learning_service.create_folder(
         name=request.name,
         user_id=current_user.id,
-        parent_folder_id=request.parent_folder_id
+        parent_folder_id=request.parent_folder_id,
     )
-    
+
     return FolderResponse(
         id=folder.id,
         name=folder.name,
         parent_folder_id=folder.parent_folder_id,
         created_at=folder.created_at,
-        updated_at=folder.updated_at
+        updated_at=folder.updated_at,
     )
 
 
@@ -181,7 +190,7 @@ async def create_folder(
 async def delete_folder(
     folder_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Delete a folder and all its contents recursively.
@@ -199,14 +208,11 @@ async def delete_folder(
     Only folders that belong to the authenticated user can be deleted.
     """
 
-    learning_service.delete_folder(
-        folder_id=folder_id,
-        user_id=current_user.id
-    )
+    learning_service.delete_folder(folder_id=folder_id, user_id=current_user.id)
 
     return {
         "message": f"Folder {folder_id} and all its contents deleted successfully",
-        "folder_id": folder_id
+        "folder_id": folder_id,
     }
 
 
@@ -238,26 +244,26 @@ async def create_resource(
         "user_id": current_user.id,
     }
 
-@router.get('/resources/{resource_id}', response_model=ResourceResponse)
+
+@router.get("/resources/{resource_id}", response_model=ResourceResponse)
 async def get_resource(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Get a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to retrieve
-    
+
     Returns the complete resource information including metadata, content details, and status.
     Only returns resources that belong to the authenticated user.
     """
-    
+
     resource = learning_service.get_resource(
-        resource_id=resource_id,
-        user_id=current_user.id
+        resource_id=resource_id, user_id=current_user.id
     )
-    
+
     return ResourceResponse(
         id=resource.id,
         title=resource.title,
@@ -267,118 +273,127 @@ async def get_resource(
         summary_notes=resource.summary_notes,
         status=resource.status,
         created_at=resource.created_at,
-        updated_at=resource.updated_at
+        updated_at=resource.updated_at,
     )
 
-@router.get('/resources/{resource_id}/transcript', response_model=TranscriptResponse)
+
+@router.get("/resources/{resource_id}/transcript", response_model=TranscriptResponse)
 async def get_resource_transcript(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Get the transcript for a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to retrieve the transcript for
-    
+
     Returns the transcript content for the resource.
     Only returns transcripts for resources that belong to the authenticated user.
     """
-    
+
     transcript = learning_service.get_resource_transcript(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
-    
-    return TranscriptResponse(
-        resource_id=resource_id,
-        transcript=transcript
+        resource_id=resource_id, user_id=current_user.id
     )
 
-@router.get('/resources/{resource_id}/flash-cards', response_model=List[FlashCardResponse])
+    return TranscriptResponse(resource_id=resource_id, transcript=transcript)
+
+
+@router.get(
+    "/resources/{resource_id}/flash-cards", response_model=List[FlashCardResponse]
+)
 async def get_flash_cards(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Get the flash cards for a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to get flash cards for
-    
+
     Returns a list of flash cards associated with the resource.
     Only returns flash cards that belong to the authenticated user.
     """
-    
-    flash_cards = learning_service.get_flash_cards(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
-    
-    return [FlashCardResponse(
-        id=card.id,
-        resource_id=card.resource_id,
-        front=card.front,
-        back=card.back,
-        created_at=card.created_at,
-        updated_at=card.updated_at
-    ) for card in flash_cards]
 
-@router.get('/resources/{resource_id}/flash-cards/exists', response_model=FlashCardsExistResponse)
+    flash_cards = learning_service.get_flash_cards(
+        resource_id=resource_id, user_id=current_user.id
+    )
+
+    return [
+        FlashCardResponse(
+            id=card.id,
+            resource_id=card.resource_id,
+            front=card.front,
+            back=card.back,
+            created_at=card.created_at,
+            updated_at=card.updated_at,
+        )
+        for card in flash_cards
+    ]
+
+
+@router.get(
+    "/resources/{resource_id}/flash-cards/exists",
+    response_model=FlashCardsExistResponse,
+)
 async def check_flash_cards_exist(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Check if flash cards exist for a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to check for flash cards
-    
+
     Returns a boolean indicating whether the resource has any associated flash cards.
     Only checks resources that belong to the authenticated user.
     """
-    
+
     has_flash_cards = learning_service.check_flash_cards_exist(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
-    
-    return FlashCardsExistResponse(
-        resource_id=resource_id,
-        has_flash_cards=has_flash_cards
+        resource_id=resource_id, user_id=current_user.id
     )
 
-@router.get('/resources/{resource_id}/quiz-questions/exists', response_model=QuizQuestionsExistResponse)
+    return FlashCardsExistResponse(
+        resource_id=resource_id, has_flash_cards=has_flash_cards
+    )
+
+
+@router.get(
+    "/resources/{resource_id}/quiz-questions/exists",
+    response_model=QuizQuestionsExistResponse,
+)
 async def check_quiz_questions_exist(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Check if quiz questions exist for a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to check for quiz questions
-    
+
     Returns a boolean indicating whether the resource has any associated quiz questions.
     Only checks resources that belong to the authenticated user.
     """
-    
+
     has_quiz_questions = learning_service.check_quiz_questions_exist(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
-    
-    return QuizQuestionsExistResponse(
-        resource_id=resource_id,
-        has_quiz_questions=has_quiz_questions
+        resource_id=resource_id, user_id=current_user.id
     )
 
-@router.get('/resources/{resource_id}/transcript/exists', response_model=TranscriptExistResponse)
+    return QuizQuestionsExistResponse(
+        resource_id=resource_id, has_quiz_questions=has_quiz_questions
+    )
+
+
+@router.get(
+    "/resources/{resource_id}/transcript/exists", response_model=TranscriptExistResponse
+)
 async def check_transcript_exists(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Check if a transcript exists for a specific learning resource by ID.
@@ -390,20 +405,22 @@ async def check_transcript_exists(
     """
 
     has_transcript = learning_service.check_transcript_exists(
-        resource_id=resource_id,
-        user_id=current_user.id
+        resource_id=resource_id, user_id=current_user.id
     )
 
     return TranscriptExistResponse(
-        resource_id=resource_id,
-        has_transcript=has_transcript
+        resource_id=resource_id, has_transcript=has_transcript
     )
 
-@router.get('/resources/{resource_id}/summary-notes/exists', response_model=SummaryNotesExistResponse)
+
+@router.get(
+    "/resources/{resource_id}/summary-notes/exists",
+    response_model=SummaryNotesExistResponse,
+)
 async def check_summary_notes_exist(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Check if summary notes exist for a specific learning resource by ID.
@@ -415,114 +432,120 @@ async def check_summary_notes_exist(
     """
 
     has_summary_notes = learning_service.check_summary_notes_exist(
-        resource_id=resource_id,
-        user_id=current_user.id
+        resource_id=resource_id, user_id=current_user.id
     )
 
     return SummaryNotesExistResponse(
-        resource_id=resource_id,
-        has_summary_notes=has_summary_notes
+        resource_id=resource_id, has_summary_notes=has_summary_notes
     )
 
-@router.post('/resources/{resource_id}/flash-cards/ai')
+
+@router.post("/resources/{resource_id}/flash-cards/ai")
 async def generate_flash_cards_for_resource(
     resource_id: int,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Generate flash cards for a specific learning resource using AI.
-    
+
     - **resource_id**: The ID of the resource to generate flash cards for
-    
+
     This endpoint starts a background task to generate flash cards using AI based on the resource's transcript content.
     The flash cards will be created asynchronously and can be retrieved using the GET flash cards endpoint.
     Only works for resources that belong to the authenticated user.
     """
-    
+
     # Verify the resource exists and belongs to the user
     resource = learning_service.get_resource(
-        resource_id=resource_id,
-        user_id=current_user.id
+        resource_id=resource_id, user_id=current_user.id
     )
-    
+
     # Add background task to generate flash cards
     background_tasks.add_task(generate_flash_cards, resource_id)
-    
+
     return {
         "message": f"Flash card generation started for resource {resource_id}",
         "resource_id": resource_id,
-        "status": "processing"
+        "status": "processing",
     }
 
-@router.get('/resources/{resource_id}/quiz-questions', response_model=List[QuizQuestionResponse])
+
+@router.get(
+    "/resources/{resource_id}/quiz-questions", response_model=List[QuizQuestionResponse]
+)
 async def get_quiz_questions(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Get the quiz questions for a specific learning resource by ID.
-    
+
     - **resource_id**: The ID of the resource to get quiz questions for
-    
+
     Returns a list of multiple choice questions associated with the resource.
     Only returns quiz questions that belong to the authenticated user.
     """
-    
-    quiz_questions = learning_service.get_quiz_questions(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
-    
-    return [QuizQuestionResponse(
-        id=question.id,
-        resource_id=question.resource_id,
-        question=question.question,
-        options=question.options.split('\n'),  # Convert newline-separated string back to list
-        correct_option=question.correct_option,
-        created_at=question.created_at,
-        updated_at=question.updated_at
-    ) for question in quiz_questions]
 
-@router.post('/resources/{resource_id}/quiz-questions/ai')
+    quiz_questions = learning_service.get_quiz_questions(
+        resource_id=resource_id, user_id=current_user.id
+    )
+
+    return [
+        QuizQuestionResponse(
+            id=question.id,
+            resource_id=question.resource_id,
+            question=question.question,
+            options=question.options.split(
+                "\n"
+            ),  # Convert newline-separated string back to list
+            correct_option=question.correct_option,
+            created_at=question.created_at,
+            updated_at=question.updated_at,
+        )
+        for question in quiz_questions
+    ]
+
+
+@router.post("/resources/{resource_id}/quiz-questions/ai")
 async def generate_quiz_questions_for_resource(
     resource_id: int,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Generate quiz questions for a specific learning resource using AI.
-    
+
     - **resource_id**: The ID of the resource to generate quiz questions for
-    
+
     This endpoint starts a background task to generate quiz questions using AI based on the resource's transcript content.
     The quiz questions will be created asynchronously and can be retrieved using the GET quiz questions endpoint.
     Only works for resources that belong to the authenticated user.
     """
-    
+
     # Verify the resource exists and belongs to the user
     resource = learning_service.get_resource(
-        resource_id=resource_id,
-        user_id=current_user.id
+        resource_id=resource_id, user_id=current_user.id
     )
-    
+
     # Add background task to generate quiz questions
     background_tasks.add_task(generate_quiz_questions, resource_id)
-    
+
     return {
         "message": f"Quiz question generation started for resource {resource_id}",
         "resource_id": resource_id,
-        "status": "processing"
+        "status": "processing",
     }
 
-@router.delete('/resources/{resource_id}')
+
+@router.delete("/resources/{resource_id}")
 async def delete_resource(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Delete a learning resource by ID.
@@ -538,23 +561,20 @@ async def delete_resource(
     Only resources that belong to the authenticated user can be deleted.
     """
 
-    learning_service.delete_resource(
-        resource_id=resource_id,
-        user_id=current_user.id
-    )
+    learning_service.delete_resource(resource_id=resource_id, user_id=current_user.id)
 
     return {
         "message": f"Resource {resource_id} deleted successfully",
-        "resource_id": resource_id
+        "resource_id": resource_id,
     }
 
-@router.post('/resources/{resource_id}/flash-cards/manual')
+
+@router.post("/resources/{resource_id}/flash-cards/manual")
 async def manual_create_flash_card(
     resource_id: int,
     current_user: User = Depends(get_current_user),
-    learning_service: LearningService = Depends(LearningService)
+    learning_service: LearningService = Depends(LearningService),
 ):
     """
     Create a new flash card for a specific learning resource by ID.
     """
-    
