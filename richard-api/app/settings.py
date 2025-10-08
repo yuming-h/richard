@@ -14,5 +14,8 @@ class Settings(BaseSettings):
     # S3
     files_s3_bucket_name: str = Field(alias="RICHARD_FILES_S3_BUCKET_NAME")
 
+    webshare_proxy_username: str = "qdudxsmf"
+    webshare_proxy_password: str = "5dov6jz6k5mf"
+
 
 settings = Settings()

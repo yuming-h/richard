@@ -1,8 +1,12 @@
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig
+
 import re
 import logging
+from urllib.parse import unquote
 from app.learning.models import LearningResource, LearningResourceFileType
 from sqlalchemy.orm import Session
+from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +127,10 @@ def transcribe_youtube_link(resource: LearningResource, db: Session = None):
         # Fetch transcript from YouTube
         try:
             # Create YouTubeTranscriptApi instance and fetch transcript
-            ytt_api = YouTubeTranscriptApi()
+            ytt_api = YouTubeTranscriptApi(proxy=WebshareProxyConfig(
+                username=settings.webshare_proxy_username,
+                password=settings.webshare_proxy_password
+            ))
             fetched_transcript = ytt_api.fetch(video_id)
             
             # Convert fetched transcript to list format for formatting function
@@ -188,11 +195,10 @@ def transcribe_audio(resource: LearningResource, db: Session = None):
             bucket_name, s3_key = s3_path.split('/', 1)
         elif resource.file_url.startswith('https://') and '.s3.' in resource.file_url:
             # Parse HTTPS S3 URL format: https://bucket-name.s3.region.amazonaws.com/key
-            import re
             match = re.match(r'https://([^.]+)\.s3\.[^/]+\.amazonaws\.com/(.+)', resource.file_url)
             if match:
                 bucket_name = match.group(1)
-                s3_key = match.group(2)
+                s3_key = unquote(match.group(2))  # URL decode the key
             else:
                 raise ValueError(f"Unable to parse S3 bucket and key from URL: {resource.file_url}")
         else:
@@ -306,11 +312,10 @@ def transcribe_pdf(resource: LearningResource, db: Session = None):
             bucket_name, s3_key = s3_path.split('/', 1)
         elif resource.file_url.startswith('https://') and '.s3.' in resource.file_url:
             # Parse HTTPS S3 URL format: https://bucket-name.s3.region.amazonaws.com/key
-            import re
             match = re.match(r'https://([^.]+)\.s3\.[^/]+\.amazonaws\.com/(.+)', resource.file_url)
             if match:
                 bucket_name = match.group(1)
-                s3_key = match.group(2)
+                s3_key = unquote(match.group(2))  # URL decode the key
             else:
                 raise ValueError(f"Unable to parse S3 bucket and key from URL: {resource.file_url}")
         else:
@@ -326,8 +331,27 @@ def transcribe_pdf(resource: LearningResource, db: Session = None):
             temp_pdf_path = temp_file.name
 
         try:
-            # Download from S3
-            s3_client.download_file(bucket_name, s3_key, temp_pdf_path)
+            # Poll S3 for up to 30 seconds in case of eventual consistency
+            import time
+            from botocore.exceptions import ClientError
+
+            max_retries = 6  # 6 retries * 5 seconds = 30 seconds
+            retry_delay = 5  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    # Download from S3
+                    s3_client.download_file(bucket_name, s3_key, temp_pdf_path)
+                    logger.info(f"Successfully downloaded PDF file on attempt {attempt + 1}")
+                    break
+                except ClientError as e:
+                    error_code = e.response['Error']['Code']
+                    if error_code == '404' and attempt < max_retries - 1:
+                        logger.warning(f"File not found on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                    else:
+                        # Either not a 404 or we've exhausted retries
+                        raise e
             logger.info(f"Successfully downloaded PDF file to: {temp_pdf_path}")
 
             # Convert PDF pages to images with better error handling

@@ -210,11 +210,12 @@ class AuthService:
         self.db.add(root_folder)
         self.db.commit()
         self.db.refresh(root_folder)
-        
+
         # Update user with root folder reference
         user.root_folder_id = root_folder.id
         self.db.commit()
-        
+        self.db.refresh(user)
+
         return root_folder
 
     def generate_jwt_token(self, user: User) -> str:
