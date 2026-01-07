@@ -18,7 +18,7 @@ if not DATABASE_URL:
 
 from app.database import Base
 from app.users.models import User
-from app.learning.models import LearningResource, LearningResourceFileType, ResourceStatus, ResourceFolder, FlashCard, MultipleChoiceQuestion
+from app.learning.models import LearningResource, LearningResourceFileType, ResourceStatus, ResourceFolder, FlashCard, MultipleChoiceQuestion, LearningResourceImage
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

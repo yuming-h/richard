@@ -1,7 +1,11 @@
-ependencies:
+# Richard App
+
+non-uv dependencies:
 
 poppler
 tesseract-ocr
+
+## Running locally
 
 ```
 uv run uvicorn app.main:app --reload
@@ -11,6 +15,9 @@ uv run alembic revision --autogenerate -m ""
 uv run alembic upgrade head
 ```
 
+## Production deployment
+
+richard-server (AWS)
 tmux attach -t richard-api-session
 RICHARD_ENV="production" uv run uvicorn app.main:app --reload --workers 4
 

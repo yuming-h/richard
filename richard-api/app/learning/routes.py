@@ -73,6 +73,7 @@ class ResourceResponse(BaseModel):
     resource_type: LearningResourceFileType
     folder_id: int
     file_url: Optional[str]
+    image_urls: List[str] = []
     summary_notes: str
     status: ResourceStatus
     created_at: datetime
@@ -218,22 +219,30 @@ async def delete_folder(
 
 @router.post("/resources")
 async def create_resource(
-    request: CreateResourceRequest,
-    background_tasks: BackgroundTasks,
+    folder_id: int = Form(...),
+    resource_type: LearningResourceFileType = Form(...),
+    summary_notes: str = Form(""),
+    file_url: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
+    background_tasks: BackgroundTasks = None,
     learning_service: LearningService = Depends(LearningService),
     current_user: User = Depends(get_current_user),
 ):
     """
     Create a new learning resource
-    Accepts JSON data + optional compressed file
+    Accepts form data with:
+    - Single file upload (for PDF, AUDIO, etc.)
+    - Multiple file uploads (for IMAGE resource type)
     """
     resource = await learning_service.create_resource(
-        folder_id=request.folder_id,
+        folder_id=folder_id,
         user_id=current_user.id,
-        resource_type=request.resource_type,
-        summary_notes=request.summary_notes,
-        file_url=request.file_url,
-        file=request.file,
+        resource_type=resource_type,
+        summary_notes=summary_notes,
+        file_url=file_url,
+        file=file,
+        files=files,
     )
 
     background_tasks.add_task(ingest_resource, resource.id)
@@ -257,6 +266,7 @@ async def get_resource(
     - **resource_id**: The ID of the resource to retrieve
 
     Returns the complete resource information including metadata, content details, and status.
+    For image resources, includes a list of image URLs in the order they were uploaded.
     Only returns resources that belong to the authenticated user.
     """
 
@@ -264,12 +274,20 @@ async def get_resource(
         resource_id=resource_id, user_id=current_user.id
     )
 
+    # Fetch image URLs for image resources
+    image_urls = []
+    if resource.resource_type == LearningResourceFileType.IMAGE:
+        image_urls = learning_service.get_resource_images(
+            resource_id=resource_id, user_id=current_user.id
+        )
+
     return ResourceResponse(
         id=resource.id,
         title=resource.title,
         resource_type=resource.resource_type,
         folder_id=resource.folder_id,
         file_url=resource.file_url,
+        image_urls=image_urls,
         summary_notes=resource.summary_notes,
         status=resource.status,
         created_at=resource.created_at,

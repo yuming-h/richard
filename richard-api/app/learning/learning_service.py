@@ -1,4 +1,4 @@
-from app.learning.models import LearningResource, LearningResourceFileType, ResourceFolder, FlashCard, MultipleChoiceQuestion
+from app.learning.models import LearningResource, LearningResourceFileType, ResourceFolder, FlashCard, MultipleChoiceQuestion, LearningResourceImage
 from app.users.models import User
 from sqlalchemy.orm import Session, undefer
 from fastapi import Depends, HTTPException
@@ -70,14 +70,82 @@ class LearningService:
                     bucket_name,
                     s3_key
                 )
-                
-                # Return the S3 URL
-                return f"s3://{bucket_name}/{s3_key}"
+
+                # Get the region from the S3 client
+                region = s3_client.meta.region_name or 'us-east-2'
+
+                # Return the HTTPS URL instead of S3 URI
+                return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
                 
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid zip file format")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
+
+    async def upload_images_to_s3(self, files: List[UploadFile]) -> List[str]:
+        """
+        Upload multiple image files to S3.
+        Returns a list of S3 URLs for the uploaded images.
+        """
+        try:
+            # Initialize S3 client
+            s3_client = boto3.client('s3')
+            bucket_name = settings.files_s3_bucket_name
+
+            uploaded_urls = []
+
+            for file in files:
+                # Validate file type
+                if not file.content_type or not file.content_type.startswith('image/'):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid file type for {file.filename}. Only image files are allowed."
+                    )
+
+                # Generate unique file name
+                file_id = str(uuid.uuid4())
+                file_extension = os.path.splitext(file.filename)[1]
+
+                if not file_extension:
+                    # Try to get extension from content type
+                    content_type_map = {
+                        'image/jpeg': '.jpg',
+                        'image/png': '.png',
+                        'image/gif': '.gif',
+                        'image/webp': '.webp'
+                    }
+                    file_extension = content_type_map.get(file.content_type, '.jpg')
+
+                # Create S3 key with unique ID
+                s3_key = f"images/{file_id}{file_extension}"
+
+                # Read file content
+                file_content = await file.read()
+
+                # Upload to S3
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    Body=file_content,
+                    ContentType=file.content_type
+                )
+
+                # Get the region from the S3 client
+                region = s3_client.meta.region_name or 'us-east-2'
+
+                # Create the HTTPS URL
+                image_url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+                uploaded_urls.append(image_url)
+
+                # Reset file pointer for potential re-use
+                await file.seek(0)
+
+            return uploaded_urls
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Image upload error: {str(e)}")
 
     def get_folder_contents(
         self,
@@ -188,10 +256,13 @@ class LearningService:
         summary_notes: str,
         file_url: str = None,
         file: UploadFile = None,
+        files: List[UploadFile] = None,
     ):
+        # Handle single file upload for non-image resources
         if file:
             file_url = await self.decompress_and_upload_file(file)
 
+        # Create the main resource
         resource = LearningResource(
             folder_id=folder_id,
             user_id=user_id,
@@ -209,6 +280,22 @@ class LearningService:
 
         self.db.commit()
         self.db.refresh(resource)
+
+        # Handle multiple image uploads for IMAGE resource type
+        if resource_type == LearningResourceFileType.IMAGE and files:
+            image_urls = await self.upload_images_to_s3(files)
+
+            # Create LearningResourceImage records for each uploaded image
+            for image_url in image_urls:
+                resource_image = LearningResourceImage(
+                    user_id=user_id,
+                    resource_id=resource.id,
+                    image_url=image_url
+                )
+                self.db.add(resource_image)
+
+            self.db.commit()
+
         return resource
 
     def create_folder(
@@ -260,14 +347,14 @@ class LearningService:
     ):
         """
         Get a specific learning resource by ID.
-        
+
         Args:
             resource_id: ID of the resource to retrieve
             user_id: ID of the current user (for security)
-            
+
         Returns:
             The LearningResource object
-            
+
         Raises:
             HTTPException: If resource not found or doesn't belong to user
         """
@@ -275,11 +362,33 @@ class LearningService:
             LearningResource.id == resource_id,
             LearningResource.user_id == user_id
         ).first()
-        
+
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
-        
+
         return resource
+
+    def get_resource_images(
+        self,
+        resource_id: int,
+        user_id: int
+    ) -> List[str]:
+        """
+        Get all image URLs for a specific learning resource, ordered by creation time.
+
+        Args:
+            resource_id: ID of the resource to retrieve images for
+            user_id: ID of the current user (for security)
+
+        Returns:
+            List of image URLs in the order they were uploaded
+        """
+        images = self.db.query(LearningResourceImage).filter(
+            LearningResourceImage.resource_id == resource_id,
+            LearningResourceImage.user_id == user_id
+        ).order_by(LearningResourceImage.created_at.asc()).all()
+
+        return [image.image_url for image in images]
 
     def get_flash_cards(
         self,
@@ -515,6 +624,7 @@ class LearningService:
     def delete_s3_file(self, file_url: str) -> bool:
         """
         Delete a file from S3 if it's from our bucket.
+        Supports both s3:// and https:// S3 URLs.
 
         Args:
             file_url: The S3 URL of the file to delete
@@ -522,7 +632,7 @@ class LearningService:
         Returns:
             True if file was deleted or doesn't need deletion, False if error occurred
         """
-        if not file_url or not file_url.startswith('s3://'):
+        if not file_url:
             return True  # Nothing to delete
 
         try:
@@ -531,12 +641,23 @@ class LearningService:
             bucket_name = settings.files_s3_bucket_name
 
             # Extract bucket and key from S3 URL
-            # Format: s3://bucket-name/key/path
-            url_parts = file_url.replace('s3://', '').split('/', 1)
-            if len(url_parts) != 2:
-                return True  # Invalid URL format, nothing to delete
-
-            file_bucket, s3_key = url_parts
+            if file_url.startswith('s3://'):
+                # Format: s3://bucket-name/key/path
+                url_parts = file_url.replace('s3://', '').split('/', 1)
+                if len(url_parts) != 2:
+                    return True  # Invalid URL format, nothing to delete
+                file_bucket, s3_key = url_parts
+            elif file_url.startswith('https://') and '.s3.' in file_url:
+                # Format: https://bucket-name.s3.region.amazonaws.com/key/path
+                import re
+                match = re.match(r'https://([^.]+)\.s3\.[^/]+\.amazonaws\.com/(.+)', file_url)
+                if match:
+                    file_bucket = match.group(1)
+                    s3_key = match.group(2)
+                else:
+                    return True  # Can't parse URL, nothing to delete
+            else:
+                return True  # Not an S3 URL, nothing to delete
 
             # Only delete if it's from our bucket
             if file_bucket != bucket_name:
@@ -581,6 +702,21 @@ class LearningService:
         # Delete S3 file if it exists and is from our bucket
         if resource.file_url:
             self.delete_s3_file(resource.file_url)
+
+        # Delete associated resource images and their S3 files
+        resource_images = self.db.query(LearningResourceImage).filter(
+            LearningResourceImage.resource_id == resource_id,
+            LearningResourceImage.user_id == user_id
+        ).all()
+
+        for resource_image in resource_images:
+            if resource_image.image_url:
+                self.delete_s3_file(resource_image.image_url)
+
+        self.db.query(LearningResourceImage).filter(
+            LearningResourceImage.resource_id == resource_id,
+            LearningResourceImage.user_id == user_id
+        ).delete()
 
         # Delete associated flash cards
         self.db.query(FlashCard).filter(
@@ -674,6 +810,21 @@ class LearningService:
             # Delete S3 file if it exists and is from our bucket
             if resource.file_url:
                 self.delete_s3_file(resource.file_url)
+
+            # Delete associated resource images and their S3 files
+            resource_images = self.db.query(LearningResourceImage).filter(
+                LearningResourceImage.resource_id == resource.id,
+                LearningResourceImage.user_id == user_id
+            ).all()
+
+            for resource_image in resource_images:
+                if resource_image.image_url:
+                    self.delete_s3_file(resource_image.image_url)
+
+            self.db.query(LearningResourceImage).filter(
+                LearningResourceImage.resource_id == resource.id,
+                LearningResourceImage.user_id == user_id
+            ).delete()
 
             # Delete associated flash cards
             self.db.query(FlashCard).filter(

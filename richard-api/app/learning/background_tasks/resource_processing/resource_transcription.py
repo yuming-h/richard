@@ -127,9 +127,9 @@ def transcribe_youtube_link(resource: LearningResource, db: Session = None):
         # Fetch transcript from YouTube
         try:
             # Create YouTubeTranscriptApi instance and fetch transcript
-            ytt_api = YouTubeTranscriptApi(proxy=WebshareProxyConfig(
-                username=settings.webshare_proxy_username,
-                password=settings.webshare_proxy_password
+            ytt_api = YouTubeTranscriptApi(proxy_config=WebshareProxyConfig(
+                proxy_username=settings.webshare_proxy_username,
+                proxy_password=settings.webshare_proxy_password
             ))
             fetched_transcript = ytt_api.fetch(video_id)
             
@@ -451,10 +451,161 @@ def transcribe_text(resource: LearningResource, db: Session = None):
         resource.transcript = f"Text processing failed: {str(e)}"
 
 
+def transcribe_images(resource: LearningResource, db: Session = None):
+    """
+    Transcribe multiple image files using pytesseract for OCR.
+
+    Dependencies Required:
+    - tesseract-ocr (for pytesseract)
+
+    Args:
+        resource: LearningResource with associated LearningResourceImage records
+        db: Database session for querying image records
+
+    Updates:
+        resource.transcript: The extracted text from all images
+    """
+    import boto3
+    import tempfile
+    import os
+    from PIL import Image
+    from app.settings import settings
+    from app.learning.models import LearningResourceImage
+
+    try:
+        # Check dependencies first
+        try:
+            import pytesseract
+        except ImportError as e:
+            logger.error(f"pytesseract not installed: {e}")
+            resource.transcript = "Image processing unavailable: pytesseract library not installed. Please install pytesseract and tesseract-ocr."
+            return
+
+        if not db:
+            logger.error("Database session is required for transcribe_images")
+            resource.transcript = "Image processing failed: Database session not provided."
+            return
+
+        # Get all images associated with this resource
+        resource_images = db.query(LearningResourceImage).filter(
+            LearningResourceImage.resource_id == resource.id,
+            LearningResourceImage.user_id == resource.user_id
+        ).all()
+
+        if not resource_images:
+            logger.warning(f"No images found for resource {resource.id}")
+            resource.transcript = "No images found for this resource."
+            return
+
+        logger.info(f"Starting image transcription for {len(resource_images)} images in resource {resource.id}")
+
+        # Initialize S3 client
+        s3_client = boto3.client('s3')
+        bucket_name = settings.files_s3_bucket_name
+
+        extracted_text_pages = []
+
+        # Process each image
+        for i, resource_image in enumerate(resource_images):
+            try:
+                logger.info(f"Processing image {i + 1}/{len(resource_images)}: {resource_image.image_url}")
+
+                # Parse S3 URL to get bucket and key
+                if resource_image.image_url.startswith('https://') and '.s3.' in resource_image.image_url:
+                    # Parse HTTPS S3 URL format: https://bucket-name.s3.region.amazonaws.com/key/path
+                    match = re.match(r'https://([^.]+)\.s3\.[^/]+\.amazonaws\.com/(.+)', resource_image.image_url)
+                    if match:
+                        file_bucket = match.group(1)
+                        s3_key = unquote(match.group(2))  # URL decode the key
+                    else:
+                        logger.warning(f"Unable to parse S3 URL: {resource_image.image_url}")
+                        continue
+                elif resource_image.image_url.startswith('s3://'):
+                    # Format: s3://bucket-name/key/path
+                    s3_path = resource_image.image_url[5:]  # Remove 's3://'
+                    file_bucket, s3_key = s3_path.split('/', 1)
+                else:
+                    logger.warning(f"Invalid S3 URL format: {resource_image.image_url}")
+                    continue
+
+                # Only process if it's from our bucket
+                if file_bucket != bucket_name:
+                    logger.warning(f"Image is not from our bucket: {file_bucket} != {bucket_name}")
+                    continue
+
+                # Download image from S3 to temporary file
+                file_extension = os.path.splitext(s3_key)[1]
+                if not file_extension:
+                    file_extension = '.jpg'  # Default to jpg if no extension
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+                    temp_image_path = temp_file.name
+
+                try:
+                    # Download from S3
+                    s3_client.download_file(bucket_name, s3_key, temp_image_path)
+                    logger.info(f"Successfully downloaded image {i + 1} to: {temp_image_path}")
+
+                    # Open image with PIL
+                    image = Image.open(temp_image_path)
+
+                    # Use pytesseract to extract text from image
+                    logger.info(f"Running OCR on image {i + 1}...")
+                    image_text = pytesseract.image_to_string(image, lang='eng')
+
+                    if image_text.strip():
+                        extracted_text_pages.append(f"--- Image {i + 1} ---\n{image_text.strip()}")
+                        logger.info(f"Extracted {len(image_text.strip())} characters from image {i + 1}")
+                    else:
+                        logger.warning(f"No text found in image {i + 1}")
+                        extracted_text_pages.append(f"--- Image {i + 1} ---\n[No text detected in this image]")
+
+                except Exception as image_error:
+                    error_msg = str(image_error).lower()
+                    if "tesseract" in error_msg or "not installed" in error_msg:
+                        logger.error(f"Tesseract OCR dependency missing: {image_error}")
+                        resource.transcript = "Image processing failed: Tesseract OCR not installed. Please install tesseract-ocr on the server."
+                        return
+                    else:
+                        logger.warning(f"OCR failed on image {i + 1}: {image_error}")
+                        extracted_text_pages.append(f"--- Image {i + 1} ---\n[Error processing this image: {str(image_error)}]")
+
+                finally:
+                    # Clean up temporary image file
+                    try:
+                        os.unlink(temp_image_path)
+                        logger.info(f"Cleaned up temporary image file: {temp_image_path}")
+                    except OSError as e:
+                        logger.warning(f"Failed to clean up temporary image file {temp_image_path}: {e}")
+
+            except Exception as e:
+                logger.error(f"Error processing image {i + 1}: {e}")
+                extracted_text_pages.append(f"--- Image {i + 1} ---\n[Error: {str(e)}]")
+                continue
+
+        # Combine all extracted text into single transcript
+        if extracted_text_pages:
+            full_transcript = "\n\n".join(extracted_text_pages)
+            resource.transcript = full_transcript
+            logger.info(f"Image transcription completed successfully. Total length: {len(full_transcript)} characters across {len(extracted_text_pages)} images")
+        else:
+            resource.transcript = "No text could be extracted from any of the images. The images may not contain readable text."
+            logger.warning("No text was extracted from any images")
+
+    except Exception as e:
+        logger.error(f"Error transcribing images: {e}")
+        # Don't raise the exception, just log it - let the resource continue processing
+        if "tesseract" in str(e).lower():
+            resource.transcript = "Image processing failed: System dependencies missing. Please ensure tesseract-ocr is installed on the server."
+        else:
+            resource.transcript = f"Image transcription failed: {str(e)}"
+
+
 
 RESOURCE_TYPE_TO_TRANSCRIBE_FUNCTION = {
     LearningResourceFileType.YOUTUBE_LINK: transcribe_youtube_link,
     LearningResourceFileType.PDF: transcribe_pdf,
     LearningResourceFileType.AUDIO: transcribe_audio,
     LearningResourceFileType.TEXT: transcribe_text,
+    LearningResourceFileType.IMAGE: transcribe_images,
 }

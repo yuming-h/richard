@@ -10,6 +10,7 @@ class LearningResourceFileType(str, PyEnum):
     YOUTUBE_LINK = "youtube_link"
     AUDIO = "audio"
     TEXT = "text"
+    IMAGE = "image"
 
 
 class ResourceStatus(str, PyEnum):
@@ -81,6 +82,18 @@ class MultipleChoiceQuestion(Base):
     question = Column(String)
     options = Column(String)  # newline separated list of options
     correct_option = Column(String)
+    created_at = Column(DateTime(timezone=False), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=False), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LearningResourceImage(Base):
+    __tablename__ = "learning_resource_images"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    resource_id = Column(Integer, ForeignKey("learning_resources.id"))
+    image_url = Column(String)
     created_at = Column(DateTime(timezone=False), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=False), server_default=func.now(), onupdate=func.now()
