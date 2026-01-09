@@ -7,6 +7,7 @@ from fastapi import (
     BackgroundTasks,
     Query,
     HTTPException,
+    Request,
 )
 from pydantic import BaseModel
 from typing import Optional, List, Literal, Union, Any
@@ -80,6 +81,15 @@ class ResourceResponse(BaseModel):
     updated_at: datetime
 
 
+class ResourceStatusResponse(BaseModel):
+    id: int
+    title: Optional[str]
+    resource_type: LearningResourceFileType
+    status: ResourceStatus
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlashCardResponse(BaseModel):
     id: int
     resource_id: int
@@ -122,6 +132,20 @@ class QuizQuestionResponse(BaseModel):
     correct_option: str
     created_at: datetime
     updated_at: datetime
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_history: List[ChatMessage] = []
+
+
+class ChatResponse(BaseModel):
+    message: str
 
 
 @router.get("/folder/{folder_id}", response_model=FolderContentsResponse)
@@ -219,22 +243,56 @@ async def delete_folder(
 
 @router.post("/resources")
 async def create_resource(
-    folder_id: int = Form(...),
-    resource_type: LearningResourceFileType = Form(...),
-    summary_notes: str = Form(""),
+    request: Request,
+    background_tasks: BackgroundTasks,
+    learning_service: LearningService = Depends(LearningService),
+    current_user: User = Depends(get_current_user),
+    folder_id: Optional[int] = Form(None),
+    resource_type: Optional[LearningResourceFileType] = Form(None),
+    summary_notes: Optional[str] = Form(None),
     file_url: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
-    background_tasks: BackgroundTasks = None,
-    learning_service: LearningService = Depends(LearningService),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new learning resource
-    Accepts form data with:
-    - Single file upload (for PDF, AUDIO, etc.)
-    - Multiple file uploads (for IMAGE resource type)
+    Accepts either:
+    - JSON body (for URL-based resources like YouTube links)
+    - Form data (for file uploads like PDF, AUDIO, IMAGE)
     """
+    content_type = request.headers.get("content-type", "")
+
+    # Handle JSON request
+    if "application/json" in content_type:
+        body = await request.json()
+        folder_id = body.get("folder_id")
+        resource_type = LearningResourceFileType(body.get("resource_type"))
+        summary_notes = body.get("summary_notes", "")
+        file_url = body.get("file_url")
+        file = None
+        files = None
+
+        if not folder_id or not resource_type:
+            raise HTTPException(
+                status_code=400,
+                detail="folder_id and resource_type are required"
+            )
+
+    # Handle form data request
+    elif "multipart/form-data" in content_type:
+        if folder_id is None or resource_type is None:
+            raise HTTPException(
+                status_code=400,
+                detail="folder_id and resource_type are required in form data"
+            )
+        summary_notes = summary_notes or ""
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Content-Type must be either application/json or multipart/form-data"
+        )
+
     resource = await learning_service.create_resource(
         folder_id=folder_id,
         user_id=current_user.id,
@@ -252,6 +310,34 @@ async def create_resource(
         "resource_id": resource.id,
         "user_id": current_user.id,
     }
+
+
+@router.get("/resources/{resource_id}/status", response_model=ResourceStatusResponse)
+async def get_resource_status(
+    resource_id: int,
+    current_user: User = Depends(get_current_user),
+    learning_service: LearningService = Depends(LearningService),
+):
+    """
+    Get lightweight status information for a resource (optimized for polling).
+
+    - **resource_id**: The ID of the resource
+
+    Returns only essential fields without large content like summary_notes.
+    Use this endpoint for status polling to reduce network overhead.
+    """
+    resource = learning_service.get_resource(
+        resource_id=resource_id, user_id=current_user.id
+    )
+
+    return ResourceStatusResponse(
+        id=resource.id,
+        title=resource.title,
+        resource_type=resource.resource_type,
+        status=resource.status,
+        created_at=resource.created_at,
+        updated_at=resource.updated_at,
+    )
 
 
 @router.get("/resources/{resource_id}", response_model=ResourceResponse)
@@ -596,3 +682,36 @@ async def manual_create_flash_card(
     """
     Create a new flash card for a specific learning resource by ID.
     """
+
+@router.post("/resources/{resource_id}/chat", response_model=ChatResponse)
+async def send_resource_chat_message(
+    resource_id: int,
+    chat_request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    learning_service: LearningService = Depends(LearningService),
+):
+    """
+    Chat with a specific learning resource by ID.
+
+    - **resource_id**: The ID of the resource to chat about
+    - **message**: The user's message/question
+    - **conversation_history**: Optional list of previous messages in the conversation
+
+    Returns an AI-generated response based on the resource's content (summary notes and transcript).
+    The conversation context is managed client-side - pass previous messages in conversation_history.
+    """
+
+    # Verify the resource exists and belongs to the user
+    resource = learning_service.get_resource(
+        resource_id=resource_id, user_id=current_user.id
+    )
+
+    # Get AI response
+    response_message = learning_service.chat_with_resource(
+        resource_id=resource_id,
+        user_id=current_user.id,
+        message=chat_request.message,
+        conversation_history=chat_request.conversation_history
+    )
+
+    return ChatResponse(message=response_message)

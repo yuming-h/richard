@@ -11,6 +11,10 @@ import os
 import boto3
 import uuid
 from typing import List, Optional, Literal, Dict, Any
+from openai import OpenAI
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LearningService:
@@ -840,3 +844,113 @@ class LearningService:
 
             # Delete the resource itself
             self.db.delete(resource)
+
+    def chat_with_resource(
+        self,
+        resource_id: int,
+        user_id: int,
+        message: str,
+        conversation_history: List[Dict[str, str]] = None
+    ) -> str:
+        """
+        Chat with a learning resource using AI based on its content.
+
+        Args:
+            resource_id: ID of the resource to chat about
+            user_id: ID of the current user (for security)
+            message: The user's message/question
+            conversation_history: Optional list of previous messages in format [{"role": "...", "content": "..."}]
+
+        Returns:
+            The AI-generated response string
+
+        Raises:
+            HTTPException: If resource not found or doesn't belong to user
+        """
+        # Query with undefer to explicitly load the transcript field
+        resource = self.db.query(LearningResource).options(
+            undefer(LearningResource.transcript)
+        ).filter(
+            LearningResource.id == resource_id,
+            LearningResource.user_id == user_id
+        ).first()
+
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        # Build the context from the resource content
+        context_parts = []
+
+        if resource.title:
+            context_parts.append(f"Resource Title: {resource.title}")
+
+        if resource.summary_notes and resource.summary_notes.strip():
+            context_parts.append(f"Summary Notes:\n{resource.summary_notes}")
+
+        if resource.transcript and resource.transcript.strip():
+            context_parts.append(f"Full Transcript:\n{resource.transcript}")
+
+        if not context_parts:
+            raise HTTPException(
+                status_code=400,
+                detail="This resource doesn't have any content to chat about yet. Please wait for processing to complete."
+            )
+
+        resource_context = "\n\n".join(context_parts)
+
+        # Build the system message with resource context
+        system_message = f"""You are a helpful tutor assistant helping a student learn from their study materials.
+The student has provided you with the following learning resource content:
+
+{resource_context}
+
+Your role is to:
+- Answer questions about the content clearly and accurately
+- Help the student understand difficult concepts
+- Provide examples and clarifications when needed
+- Encourage learning and critical thinking
+- Base your answers on the provided content, but you can also add relevant supplementary information
+
+Always be supportive, patient, and educational in your responses."""
+
+        # Build the messages array for OpenAI
+        messages = [{"role": "system", "content": system_message}]
+
+        # Add conversation history if provided
+        if conversation_history:
+            for msg in conversation_history:
+                messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+
+        # Add the current user message
+        messages.append({"role": "user", "content": message})
+
+        try:
+            # Initialize OpenAI client
+            client = OpenAI()
+
+            # Get response from OpenAI
+            response = client.chat.completions.create(
+                model="gpt-5",
+                messages=messages,
+            )
+
+            # Extract and return the response message
+            response_message = response.choices[0].message.content
+
+            if not response_message or response_message.strip() == "":
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate a response. Please try again."
+                )
+
+            return response_message.strip()
+
+        except Exception as e:
+            logger.error(f"Failed to generate chat response for resource {resource_id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate response: {str(e)}"
+            )

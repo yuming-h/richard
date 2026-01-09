@@ -42,8 +42,6 @@ def ingest_resource(resource_id: int):
             save_resource_status(resource, ResourceStatus.TRANSCRIBING, db)
             RESOURCE_TYPE_TO_TRANSCRIBE_FUNCTION[resource.resource_type](resource, db)
 
-        save_resource_status(resource, ResourceStatus.TRANSCRIBING, db)
-
         save_resource_status(resource, ResourceStatus.SUMMARIZING, db)
 
 
