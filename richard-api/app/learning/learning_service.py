@@ -911,7 +911,7 @@ Your role is to:
 - Encourage learning and critical thinking
 - Base your answers on the provided content, but you can also add relevant supplementary information
 
-Always be supportive, patient, and educational in your responses."""
+Always be supportive, patient, educational, but brief and succinct in your responses."""
 
         # Build the messages array for OpenAI
         messages = [{"role": "system", "content": system_message}]

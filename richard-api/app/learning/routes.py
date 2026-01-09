@@ -706,12 +706,18 @@ async def send_resource_chat_message(
         resource_id=resource_id, user_id=current_user.id
     )
 
+    # Convert Pydantic models to dictionaries for the service layer
+    conversation_history_dicts = [
+        {"role": msg.role, "content": msg.content}
+        for msg in chat_request.conversation_history
+    ]
+
     # Get AI response
     response_message = learning_service.chat_with_resource(
         resource_id=resource_id,
         user_id=current_user.id,
         message=chat_request.message,
-        conversation_history=chat_request.conversation_history
+        conversation_history=conversation_history_dicts
     )
 
     return ChatResponse(message=response_message)
