@@ -151,6 +151,22 @@ class LearningService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Image upload error: {str(e)}")
 
+    def list_user_folders(self, user_id: int) -> List[ResourceFolder]:
+        """
+        List all folders that belong to a specific user.
+
+        Args:
+            user_id: ID of the user
+
+        Returns:
+            List of ResourceFolder objects ordered by created_at desc (most recent first)
+        """
+        folders = self.db.query(ResourceFolder).filter(
+            ResourceFolder.user_id == user_id
+        ).order_by(ResourceFolder.created_at.desc()).all()
+
+        return folders
+
     def get_folder_contents(
         self,
         folder_id: int,
@@ -159,49 +175,28 @@ class LearningService:
     ) -> Dict[str, Any]:
         """
         Get contents of a specific folder with optional filtering by item type.
-        
+
         Args:
             folder_id: ID of the folder to get contents from
             user_id: ID of the current user (for security)
             item_type: Optional filter - 'folder', 'resource', or None for all
-            
+
         Returns:
             Dictionary with folder_id and list of items
-            
+
         Raises:
             HTTPException: If folder not found or doesn't belong to user
         """
-        # Verify folder exists and belongs to user, or handle root folder case
-        if folder_id == 1:
-            # Special case for root folder - it may not exist in DB
-            folder_name = "My Files"
-            folder_created_at = None
+        folder = self.db.query(ResourceFolder).filter(
+            ResourceFolder.id == folder_id,
+            ResourceFolder.user_id == user_id
+        ).first()
+        
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
             
-            # Try to get or create root folder
-            folder = self.db.query(ResourceFolder).filter(
-                ResourceFolder.id == folder_id,
-                ResourceFolder.user_id == user_id
-            ).first()
-            
-            if folder:
-                folder_name = folder.name
-                folder_created_at = folder.created_at
-            else:
-                # For root folder, use default values if not in DB
-                from datetime import datetime
-                folder_created_at = datetime.now()
-        else:
-            # For non-root folders, they must exist
-            folder = self.db.query(ResourceFolder).filter(
-                ResourceFolder.id == folder_id,
-                ResourceFolder.user_id == user_id
-            ).first()
-            
-            if not folder:
-                raise HTTPException(status_code=404, detail="Folder not found")
-                
-            folder_name = folder.name
-            folder_created_at = folder.created_at
+        folder_name = folder.name
+        folder_created_at = folder.created_at
         
         items = []
         
@@ -233,6 +228,7 @@ class LearningService:
                 items.append({
                     "id": resource.id,
                     "title": resource.title,
+                    "emoji": resource.emoji,
                     "resource_type": resource.resource_type,
                     "folder_id": resource.folder_id,
                     "file_url": resource.file_url,
@@ -243,7 +239,7 @@ class LearningService:
                 })
         
         # Sort items: folders first, then resources (both already sorted reverse chronologically)
-        items.sort(key=lambda x: (x["type"] != "folder", x["created_at"]), reverse=False)
+        # items.sort(key=lambda x: (x["type"] != "folder", x["created_at"]), reverse=False)
         
         return {
             "folder_id": folder_id,
@@ -257,7 +253,7 @@ class LearningService:
         folder_id: int,
         user_id: int,
         resource_type: LearningResourceFileType,
-        summary_notes: str,
+        transcript: str,
         file_url: str = None,
         file: UploadFile = None,
         files: List[UploadFile] = None,
@@ -266,12 +262,12 @@ class LearningService:
         if file:
             file_url = await self.decompress_and_upload_file(file)
 
-        # Create the main resource
+        # Create the main resource with transcript
         resource = LearningResource(
             folder_id=folder_id,
             user_id=user_id,
             resource_type=resource_type.value,
-            summary_notes=summary_notes,
+            transcript=transcript,
             file_url=file_url,
         )
 

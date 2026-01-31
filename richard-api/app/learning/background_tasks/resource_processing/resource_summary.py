@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 import re
 import logging
 import yt_dlp
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,8 @@ SUMMARIZE_TEXT_PROMPT = """
 You are a tutor that is helping a student learn.
 You will be given a string of text by the student. This text may be the transcript of a lecture, a book, or other documents wherein the user wants to learn from.
 Your job is to provide summary notes in markdown format for the student to learn from.
-The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into a concise and easy-to-understand format. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. The length of the summary should be appropriate for the length and complexity of the original text, providing a clear and accurate overview without omitting any important information.”
-Provide only the summary, no other text.
+The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into a concise and easy-to-understand format. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. The length of the summary should be appropriate for the length and complexity of the original text, providing a clear and accurate overview without omitting any important information.
+Also choose a single emoji that best represents the text.
 """
 
 def generate_resource_title(resource: LearningResource, db: Session = None):
@@ -127,6 +128,25 @@ def summarize_text(resource: LearningResource, db: Session = None):
         # Initialize OpenAI client
         client = OpenAI()
         
+        response_schema = {
+            "name": "summary_with_emoji",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Summary notes of the text in markdown."
+                    },
+                    "emoji": {
+                        "type": "string",
+                        "description": "A single emoji that best represents the text."
+                    },
+                },
+                "required": ["summary", "emoji"],
+                "additionalProperties": False,
+            },
+        }
+
         # Generate summary using gpt-5
         response = client.chat.completions.create(
             model="gpt-5",
@@ -140,19 +160,29 @@ def summarize_text(resource: LearningResource, db: Session = None):
                     "content": resource.transcript
                 }
             ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": response_schema,
+            },
         )
         
-        # Extract the generated summary
-        generated_summary = response.choices[0].message.content
+        raw_content = response.choices[0].message.content
+        try:
+            parsed_content = json.loads(raw_content or "")
+        except json.JSONDecodeError as e:
+            logger.error(f"OpenAI returned invalid JSON for resource {resource.id}: {e}")
+            return
+
+        generated_summary = (parsed_content.get("summary") or "").strip()
+        generated_emoji = (parsed_content.get("emoji") or "").strip()
 
         if not generated_summary or generated_summary.strip() == "":
             logger.error(f"OpenAI returned empty summary for resource {resource.id}")
             return
 
-        generated_summary = generated_summary.strip()
-
         # Save the summary to the resource
         resource.summary_notes = generated_summary
+        resource.emoji = generated_emoji or resource.emoji
 
         if db:
             db.commit()

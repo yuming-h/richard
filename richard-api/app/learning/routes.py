@@ -43,6 +43,7 @@ class FolderItem(BaseModel):
     id: int
     name: Optional[str] = None  # For folders
     title: Optional[str] = None  # For resources
+    emoji: Optional[str] = None  # For resources
     parent_folder_id: Optional[int] = None  # For folders
     resource_type: Optional[LearningResourceFileType] = None  # For resources
     folder_id: Optional[int] = None  # For resources
@@ -71,11 +72,12 @@ class FolderResponse(BaseModel):
 class ResourceResponse(BaseModel):
     id: int
     title: Optional[str]
+    emoji: Optional[str]
     resource_type: LearningResourceFileType
     folder_id: int
     file_url: Optional[str]
     image_urls: List[str] = []
-    summary_notes: str
+    summary_notes: Optional[str]
     status: ResourceStatus
     created_at: datetime
     updated_at: datetime
@@ -146,6 +148,31 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     message: str
+
+
+@router.get("/folders", response_model=List[FolderResponse])
+async def list_folders(
+    current_user: User = Depends(get_current_user),
+    learning_service: LearningService = Depends(LearningService),
+):
+    """
+    List all folders that belong to the current user.
+
+    Returns a list of all folders owned by the authenticated user,
+    ordered by creation date (most recent first).
+    """
+    folders = learning_service.list_user_folders(user_id=current_user.id)
+
+    return [
+        FolderResponse(
+            id=folder.id,
+            name=folder.name,
+            parent_folder_id=folder.parent_folder_id,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+        )
+        for folder in folders
+    ]
 
 
 @router.get("/folder/{folder_id}", response_model=FolderContentsResponse)
@@ -249,7 +276,7 @@ async def create_resource(
     current_user: User = Depends(get_current_user),
     folder_id: Optional[int] = Form(None),
     resource_type: Optional[LearningResourceFileType] = Form(None),
-    summary_notes: Optional[str] = Form(None),
+    transcript: Optional[str] = Form(None),
     file_url: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
@@ -257,7 +284,7 @@ async def create_resource(
     """
     Create a new learning resource
     Accepts either:
-    - JSON body (for URL-based resources like YouTube links)
+    - JSON body (for URL-based resources like YouTube links and TEXT resources)
     - Form data (for file uploads like PDF, AUDIO, IMAGE)
     """
     content_type = request.headers.get("content-type", "")
@@ -267,7 +294,7 @@ async def create_resource(
         body = await request.json()
         folder_id = body.get("folder_id")
         resource_type = LearningResourceFileType(body.get("resource_type"))
-        summary_notes = body.get("summary_notes", "")
+        transcript = body.get("transcript", "")
         file_url = body.get("file_url")
         file = None
         files = None
@@ -285,7 +312,7 @@ async def create_resource(
                 status_code=400,
                 detail="folder_id and resource_type are required in form data"
             )
-        summary_notes = summary_notes or ""
+        transcript = transcript or ""
 
     else:
         raise HTTPException(
@@ -297,7 +324,7 @@ async def create_resource(
         folder_id=folder_id,
         user_id=current_user.id,
         resource_type=resource_type,
-        summary_notes=summary_notes,
+        transcript=transcript,
         file_url=file_url,
         file=file,
         files=files,
@@ -370,6 +397,7 @@ async def get_resource(
     return ResourceResponse(
         id=resource.id,
         title=resource.title,
+        emoji=resource.emoji,
         resource_type=resource.resource_type,
         folder_id=resource.folder_id,
         file_url=resource.file_url,

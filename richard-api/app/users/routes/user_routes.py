@@ -77,11 +77,14 @@ async def delete_account(
         from app.learning.models import (
             ResourceFolder,
             LearningResource,
+            LearningResourceImage,
             FlashCard,
             MultipleChoiceQuestion
         )
+        from app.learning.learning_service import LearningService
 
         user_id = current_user.id
+        learning_service = LearningService(db)
 
         # Delete in order of dependencies (child tables first)
         # 1. Delete flash cards
@@ -94,12 +97,33 @@ async def delete_account(
             MultipleChoiceQuestion.user_id == user_id
         ).delete()
 
-        # 3. Delete learning resources
+        # 3. Delete resource images and their S3 files
+        resource_images = db.query(LearningResourceImage).filter(
+            LearningResourceImage.user_id == user_id
+        ).all()
+
+        for resource_image in resource_images:
+            if resource_image.image_url:
+                learning_service.delete_s3_file(resource_image.image_url)
+
+        images_deleted = db.query(LearningResourceImage).filter(
+            LearningResourceImage.user_id == user_id
+        ).delete()
+
+        # 4. Delete learning resources and their S3 files
+        resources = db.query(LearningResource).filter(
+            LearningResource.user_id == user_id
+        ).all()
+
+        for resource in resources:
+            if resource.file_url:
+                learning_service.delete_s3_file(resource.file_url)
+
         resources_deleted = db.query(LearningResource).filter(
             LearningResource.user_id == user_id
         ).delete()
 
-        # 4. Set root_folder_id to null to avoid foreign key constraint violation
+        # 5. Set root_folder_id to null to avoid foreign key constraint violation
         # The users table has a foreign key reference to resource_folders.id via root_folder_id
         # We must null this field before deleting the folders to prevent constraint violations
         user = db.query(User).filter(User.id == user_id).first()
@@ -107,12 +131,12 @@ async def delete_account(
             user.root_folder_id = None
             db.flush()  # Apply the update before deleting folders
 
-        # 5. Delete resource folders (including nested folders)
+        # 6. Delete resource folders (including nested folders)
         folders_deleted = db.query(ResourceFolder).filter(
             ResourceFolder.user_id == user_id
         ).delete()
 
-        # 6. Finally delete the user
+        # 7. Finally delete the user
         user_deleted = db.query(User).filter(User.id == user_id).delete()
 
         # Commit all deletions
@@ -123,6 +147,7 @@ async def delete_account(
             "deleted_counts": {
                 "flash_cards": flash_cards_deleted,
                 "quiz_questions": questions_deleted,
+                "resource_images": images_deleted,
                 "learning_resources": resources_deleted,
                 "folders": folders_deleted,
                 "user": user_deleted

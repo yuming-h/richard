@@ -44,6 +44,7 @@ class LearningResource(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     title = Column(String, nullable=True)
+    emoji = Column(String, nullable=True)
     transcript = deferred(Column(String, nullable=True)) # deferred to avoid loading the transcript into memory
     summary_notes = Column(String, nullable=True)
     resource_type = Column(String)

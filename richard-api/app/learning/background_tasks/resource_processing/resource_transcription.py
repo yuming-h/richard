@@ -422,33 +422,7 @@ def transcribe_pdf(resource: LearningResource, db: Session = None):
 ### TEXT
 # ================================================
 def transcribe_text(resource: LearningResource, db: Session = None):
-    """
-    For text resources, the text content is already provided as summary_notes
-    and should be used directly as the transcript.
-
-    Args:
-        resource: LearningResource with summary_notes containing the text content
-        db: Database session (optional, for future use)
-
-    Updates:
-        resource.transcript: The text content from summary_notes
-    """
-    try:
-        if not resource.summary_notes or resource.summary_notes.strip() == "":
-            logger.warning(f"No text content available for resource {resource.id}")
-            resource.transcript = "No text content provided"
-            return
-
-        logger.info(f"Processing text content for resource {resource.id}")
-
-        # For text resources, use the summary_notes as the transcript
-        resource.transcript = resource.summary_notes.strip()
-
-        logger.info(f"Text processing completed for resource {resource.id}. Length: {len(resource.transcript)} characters")
-
-    except Exception as e:
-        logger.error(f"Error processing text content: {e}")
-        resource.transcript = f"Text processing failed: {str(e)}"
+    pass
 
 
 def transcribe_images(resource: LearningResource, db: Session = None):

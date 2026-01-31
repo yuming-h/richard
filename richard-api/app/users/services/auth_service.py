@@ -204,7 +204,7 @@ class AuthService:
         """Create a root folder for a new user"""
         root_folder = ResourceFolder(
             user_id=user.id,
-            name=f"{user.first_name}'s files",
+            name=f"{user.first_name}'s Notes" if user.first_name else "My Notes",
             parent_folder_id=None
         )
         self.db.add(root_folder)
