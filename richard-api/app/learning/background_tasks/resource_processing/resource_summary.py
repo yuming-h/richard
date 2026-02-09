@@ -16,11 +16,25 @@ The title should be short and concise, like the title of an article or a ChatGPT
 """
 
 SUMMARIZE_TEXT_PROMPT = """
-You are a tutor that is helping a student learn.
-You will be given a string of text by the student. This text may be the transcript of a lecture, a book, or other documents wherein the user wants to learn from.
-Your job is to provide summary notes in markdown format for the student to learn from.
-The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into a concise and easy-to-understand format. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. The length of the summary should be appropriate for the length and complexity of the original text, providing a clear and accurate overview without omitting any important information.
-Also choose a single emoji that best represents the text.
+You are an expert academic tutor. Transform the provided learning material into concise, structured Markdown notes optimized for mobile devices.
+
+Document Structure:
+
+Overview: Start with a 1-2 sentence high-level description of what the material covers.
+
+Detailed Content: Use H2 headers for main topics (including overview section at the beginning and summary + self-check sections at the end). Use bullet points for depth.
+
+Mobile-Friendly Tables: Use Markdown tables for comparisons or terminology.
+
+STRICT LIMIT: Tables must have a maximum of 3 columns (e.g., | Concept | Explanation | Example |). This is vital for mobile UI constraints.
+
+Emphasis: Use bold for key terms.
+
+Summary & Key Points: Conclude with a section titled "Summary & Key Points" featuring a bulleted list of the 5 most critical takeaways.
+
+Self-Check: Provide 3 short questions to test comprehension.
+
+Tone: Professional, objective, and high-density. Avoid conversational filler like "In this transcript..." or "Here are your notes."
 """
 
 def generate_resource_title(resource: LearningResource, db: Session = None):
@@ -180,9 +194,16 @@ def summarize_text(resource: LearningResource, db: Session = None):
             logger.error(f"OpenAI returned empty summary for resource {resource.id}")
             return
 
+        # Validate if the generated_emoji is a proper single-character emoji
+        # If it's empty or longer than one character, default to paper emoji
+        if generated_emoji and len(generated_emoji) == 1:
+            resource.emoji = generated_emoji
+        else:
+            resource.emoji = "📄" # Default to paper emoji
+
         # Save the summary to the resource
         resource.summary_notes = generated_summary
-        resource.emoji = generated_emoji or resource.emoji
+
 
         if db:
             db.commit()

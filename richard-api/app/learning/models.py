@@ -99,3 +99,17 @@ class LearningResourceImage(Base):
     updated_at = Column(
         DateTime(timezone=False), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Podcast(Base):
+    __tablename__ = "podcasts"
+    id = Column(Integer, primary_key=True, index=True)
+    learning_resource_id = Column(Integer, ForeignKey("learning_resources.id"))
+    audio_url = Column(String, nullable=True)
+    transcript = Column(String, nullable=True)
+    character_alignment = Column(String, nullable=True)
+    word_alignment = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=False), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=False), server_default=func.now(), onupdate=func.now()
+    )

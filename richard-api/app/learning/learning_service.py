@@ -883,9 +883,6 @@ class LearningService:
         if resource.summary_notes and resource.summary_notes.strip():
             context_parts.append(f"Summary Notes:\n{resource.summary_notes}")
 
-        if resource.transcript and resource.transcript.strip():
-            context_parts.append(f"Full Transcript:\n{resource.transcript}")
-
         if not context_parts:
             raise HTTPException(
                 status_code=400,
@@ -896,9 +893,6 @@ class LearningService:
 
         # Build the system message with resource context
         system_message = f"""You are a helpful tutor assistant helping a student learn from their study materials.
-The student has provided you with the following learning resource content:
-
-{resource_context}
 
 Your role is to:
 - Answer questions about the content clearly and accurately
@@ -907,7 +901,12 @@ Your role is to:
 - Encourage learning and critical thinking
 - Base your answers on the provided content, but you can also add relevant supplementary information
 
-Always be supportive, patient, educational, but brief and succinct in your responses."""
+Always be supportive, patient, educational, but brief and succinct in your responses.
+
+The student has provided you with the following learning resource context from their notes:
+
+{resource_context}
+"""
 
         # Build the messages array for OpenAI
         messages = [{"role": "system", "content": system_message}]

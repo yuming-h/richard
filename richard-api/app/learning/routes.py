@@ -20,6 +20,7 @@ from app.learning.background_tasks.resource_processing.resource_ingestion import
 )
 from app.learning.background_tasks.flash_card_generation import generate_flash_cards
 from app.learning.background_tasks.quiz_generation import generate_quiz_questions
+from app.learning.background_tasks.podcast_generation import generate_podcast
 from app.learning.learning_service import LearningService
 
 
@@ -668,6 +669,38 @@ async def generate_quiz_questions_for_resource(
 
     return {
         "message": f"Quiz question generation started for resource {resource_id}",
+        "resource_id": resource_id,
+        "status": "processing",
+    }
+
+
+@router.post("/resources/{resource_id}/podcast/ai")
+async def generate_podcast_for_resource(
+    resource_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    learning_service: LearningService = Depends(LearningService),
+):
+    """
+    Generate a podcast for a specific learning resource using AI.
+
+    - **resource_id**: The ID of the resource to generate a podcast for
+
+    This endpoint starts a background task to generate a podcast using AI based on the resource's content.
+    The podcast will be created asynchronously.
+    Only works for resources that belong to the authenticated user.
+    """
+
+    # Verify the resource exists and belongs to the user
+    resource = learning_service.get_resource(
+        resource_id=resource_id, user_id=current_user.id
+    )
+
+    # Add background task to generate podcast
+    background_tasks.add_task(generate_podcast, resource_id)
+
+    return {
+        "message": f"Podcast generation started for resource {resource_id}",
         "resource_id": resource_id,
         "status": "processing",
     }
